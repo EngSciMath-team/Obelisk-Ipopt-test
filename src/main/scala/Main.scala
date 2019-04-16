@@ -1,8 +1,6 @@
 import org.coinor.Ipopt
 import math._
 
-//54.39.22.187:22
-
 case class Resource(id: Int, name: String, measurementUnit: String, naturalProduction: Double)
 
 case class ResourceProduction(resource: Resource, production: Double)
@@ -17,6 +15,11 @@ case class RecipeSolution(recipeName: String, solution: Double)
 
 case class SolverResult(objectiveValue: Double, recipeSolutions: Seq[RecipeSolution])
 
+/* Extend the "Ipopt" class given by the Java interface. 
+   This includes defining functions declared in Ipopt which modify certian input variables, 
+   as opposed to returning the result.
+   The error I get on trying to run this is that the function inputs aren't declared. */
+
 class PlanIpopt(rec: Seq[Recipe], res: Array[Resource]) extends Ipopt{
 
   val recipes = rec
@@ -27,6 +30,8 @@ class PlanIpopt(rec: Seq[Recipe], res: Array[Resource]) extends Ipopt{
   val numResources = resources.length
   this.create(numRecipes, numResources, numRecipes, numRecipes, index_style)
 
+  // Set bounds on intensities (x), and the total surplus amount of a resource being produced (g).
+
   def get_bounds_info(n: Int, x_L: Array[Double], x_U: Array[Double],
                       m: Int, g_L: Array[Double], g_U: Array[Double]): Boolean {
     x_L = Array.fill(n)(0)
@@ -36,6 +41,9 @@ class PlanIpopt(rec: Seq[Recipe], res: Array[Resource]) extends Ipopt{
     true
   }
 
+  /* Give the starting intensities as (1,1,1,1,1...) for now.
+     This will change once old intensities are passed to solver. */
+
   def get_starting_point(n: Int, init_x: Boolean, x: Array[Double],
                          init_z: Boolean, z_L: Array[Double], z_U: Array[Double],
                          m: Int, init_lambda: Boolean, lambda: Array[Double]): Boolean {
@@ -44,6 +52,8 @@ class PlanIpopt(rec: Seq[Recipe], res: Array[Resource]) extends Ipopt{
     x = Array.fill(n)(1)
     true
   }
+
+  /* Define the function which gives the total utility of a set of intensities. */
 
   def eval_f(n: Int, x: Array[Double], new_x: Boolean, obj_value: Array[Double]) 
             : Boolean {
@@ -55,6 +65,9 @@ class PlanIpopt(rec: Seq[Recipe], res: Array[Resource]) extends Ipopt{
     true
   }
 
+  /* Define the function which gives the *marginal* utilities of a set of intensities. 
+     That is, the gradiant of the total utility */
+
   def eval_grad_f(n: Int, x: Array[Double], new_x: Boolean, grad_f: Array[Double]) 
                  : Boolean {
     grad_f = x.zip(this.recipes.map(_.utility).toArray).map(thisX => if (thisX._2 == 0) {
@@ -64,6 +77,8 @@ class PlanIpopt(rec: Seq[Recipe], res: Array[Resource]) extends Ipopt{
     })
     true
   }
+
+  /* Define the function which gives the surplus amount of each resource produced. */
 
   def eval_g(n: Int, x: Array[Double], new_x: Boolean, m: Int, g: Array[Double])
             : Boolean {
@@ -75,19 +90,29 @@ class PlanIpopt(rec: Seq[Recipe], res: Array[Resource]) extends Ipopt{
     true
   }
 
+  /* Define the Jacobian matrix of the constraints.
+     This corresponds in our case to the constraint matrix.
+     iRow(n) and jCol(n) correspond to the coordinates of the nth entry */
+
   def eval_jac_g(n: Int, x: Array[Double], new_x: Boolean, m: Int, nele_jac: Int,
                              iRow: Array[Int], jCol: Array[Int], values Array[Double])
             : Boolean {
-    iRow = (0 to (m-1)).toArray
-    jCol = iRow
+
+    var elementCounter : Int = 0
 
     this.recipes.foreach(recipe =>
+      iRow(elementCounter) = recipe.id
       recipe.production.foreach(resourceProduction =>
         resId = resourceProduction.resource.id
+        jCol(elementCounter) = resId
         values(resId) += resourceProduction.production
+        elementCounter += 1
     )
     true
   }
+
+  /* Define the Hessian matrix of the Lagrangian form of the problem.
+     Not sure how to compactly explain this. */
 
   def eval_h(n: Int, x: Array[Double], new_x: Boolean, obj_factor: Double,
                          m: Int, lambda: Array[Double], new_lambda: Boolean,
@@ -99,7 +124,7 @@ class PlanIpopt(rec: Seq[Recipe], res: Array[Resource]) extends Ipopt{
     this.recipes.foreach(recipe =>
       recipe.production.foreach(resourceProduction =>
         resId = resourceProduction.resource.id
-        values(resId) += resourceProduction.production/pow(x(resId), 2)
+        values(resId) += -resourceProduction.production/pow(x(resId), 2)
     )
     true
   }
@@ -130,6 +155,8 @@ class Solver {
         resources(resourceProduction.resource.id-1) = resourceProduction.resource
       )
     )
+
+    // Use the PlanIpopt class.
 
     PlanIpopt plan = new PlanIpopt(recipes, resources)
     x = Array.fill(recipes.length)(1)
@@ -298,7 +325,7 @@ class Solver {
 object Main extends App {
 
   val solver = new Solver()
-  val result = solver.solve(solver.testDataTwo)
+  val result = solver.solve(solver.testDataOne)
 
   println(result.toString)
 }
